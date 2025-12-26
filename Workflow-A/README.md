@@ -1,27 +1,40 @@
-### . Trigger Node
+# Workflow A: Email Parsing and Extraction
 
-- **Gmail Trigger:** Configure to watch for new emails with the "travel" label
-- Set polling interval (e.g., every 5-15 minutes)
-- Filter for unread emails to avoid reprocessing
+This workflow handles the ingestion of travel-related emails, processing of attachments, and extraction of structured itinerary data using AI.
 
-### 2. Email Content Extraction
+## How it Works
 
-- **Extract Email Data:** Pull subject, body, sender, date, and attachments
-- **PDF Attachment Handler:** If PDFs exist, use a PDF parser node to extract text content
-- Combine email body + PDF text into a single text payload for AI processing
+The workflow logic follows these key steps:
 
-### 3. AI Classification Node
+### 1. Ingestion
+- **[Gmail Trigger] Get many messages**: Fetches emails from Gmail that match specific criteria:
+    - Label: `travel`
+    - Status: `unread`
+    - Options: Downloads attachments allowed.
 
-- **OpenAI/Anthropic Node:** Send email content to LLM with a structured prompt
-- Prompt should ask: "Is this travel-related? If yes, classify as: flight, hotel, tour, car rental, restaurant, or other"
-- Return structured JSON response with category + confidence score
-- **IF Node:** Branch based on classification result (continue if travel-related, skip if not)
+### 2. Preprocessing
+- **[Code] Code in JavaScript**: Custom script that acts as the initial processor:
+    - Decodes different email encodings (base64url).
+    - Strips HTML tags to produce clean plain text.
+    - Scans for PDF attachments.
+    - Outputs a standardized object for each email containing metadata, cleaned body text, and a flag indicating if PDFs are present.
 
-### 4. Data Extraction Node
+### 3. Branching & OCR
+- **[If] If**: specific check for items flagged as `pdf` type.
+- **[Extract from File] Extract from File**: If the item is a PDF attachment, this node extracts the raw text content from the file.
+- **[Code] Code in JavaScript2**: specific formatter for the extracted PDF text.
 
-- **AI Extraction:** Send email to LLM with extraction prompt requesting JSON output
-- Extract fields based on category:
-- Flights: airline, flight number, departure/arrival airports, dates/times, booking reference, passenger names
-- Hotels: property name, location, check-in/check-out dates, booking reference, room type
-- Tours/Activities: activity name, location, date/time, duration, booking reference
-- Parse LLM response to extract structured JSON data
+### 4. Aggregation
+- **[Merge] Merge**: Re-combines the originally processed email objects with their corresponding extracted PDF text.
+- **[Code] Code in JavaScript1**: Consolidates everything by `messageId`.
+    - It ensures that for every email, we have one final object containing the email body + an array of text from all attached PDFs.
+
+### 5. AI Extraction
+- **[AI Agent] AI Agent**: The core intelligence node. It receives the consolidated text (email body + PDF contents) and uses a Large Language Model (GPT-4.1) to:
+    - **Classify** the type of booking (Flight, Hotel, Car, Cruise, Receipt, Other).
+    - **Extract** specific details (Dates, Confirmation Numbers, Locations, Prices) based on a strict schema.
+    - **Prioritize** PDF data over email body text for accuracy.
+
+### 6. Output
+- **[Structured Output Parser]**: Enforces the JSON schema for the final result, ensuring consistent data structure for downstream applications.
+    - *Note*: This output structure is designed to be flexible and can be easily mapped to a Supabase schema for database persistence.
