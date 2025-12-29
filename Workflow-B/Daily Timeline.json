@@ -1,0 +1,302 @@
+{
+  "name": "Daily Timeline",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -608,
+        -48
+      ],
+      "id": "edb341c6-229d-42b9-a029-ac9ace855885",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1ed01045-e88e-4dae-a788-065d28cf8b29",
+              "name": "users",
+              "value": "[   { \"user_id\": \"u_123\", \"timezone\": \"Europe/Berlin\" },   { \"user_id\": \"u_456\", \"timezone\": \"America/New_York\" } ]",
+              "type": "array"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -304,
+        -64
+      ],
+      "id": "e608b507-515c-4510-8df5-19f718226146",
+      "name": "Mock Users"
+    },
+    {
+      "parameters": {
+        "url": "https://travlo-ai-companion.lovable.app",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -464,
+        16
+      ],
+      "id": "9eb64420-dde8-49fa-941d-f7f830ab368c",
+      "name": "Text response, no error"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "users",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        -208,
+        48
+      ],
+      "id": "342be3f4-2220-4178-b52a-a3059126cdf6",
+      "name": "Split Out"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -32,
+        -64
+      ],
+      "id": "322b21b7-1f18-4944-afd8-ee0c7f4d11b4",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "name": "Replace Me",
+      "typeVersion": 1,
+      "position": [
+        -16,
+        64
+      ],
+      "id": "199ca6f5-aade-4ead-ad43-3742eb1c4960"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "757d0d19-a9f7-47d4-801a-26a7007b93b8",
+              "name": "segments",
+              "value": "[   {     \"type\": \"flight\",     \"title\": \"Flight to Paris\",     \"start_time\": \"2025-12-19T08:30:00.000Z\",     \"location\": \"Berlin Airport\"   },   {     \"type\": \"hotel\",     \"title\": \"Hotel Check-in\",     \"start_time\": \"2025-12-19T14:00:00.000Z\",     \"location\": \"Paris\"   } ]",
+              "type": "array"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        192,
+        80
+      ],
+      "id": "e3fd67f0-5135-4470-b87f-3fa9d53f0b17",
+      "name": "Mock Segments"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Expects: $json.segments (array), $json.timezone, $json.user_id, $json.dateKey\n\nfunction hhmmInTz(iso, tz) {\n  const d = new Date(iso);\n  return new Intl.DateTimeFormat(\"en-GB\", {\n    timeZone: tz,\n    hour: \"2-digit\",\n    minute: \"2-digit\",\n    hour12: false,\n  }).format(d);\n}\n\nconst user_id = $json.user_id;\nconst timezone = $json.timezone || \"UTC\";\nconst dateKey = $json.dateKey;\n\nconst segments = Array.isArray($json.segments) ? $json.segments : [];\n\n// Normalize + sort by start_time\nconst sorted = segments\n  .map(s => ({\n    type: s.type || \"activity\",\n    title: s.title || s.label || \"Untitled\",\n    location: s.location || s.start_location || \"\",\n    start_time: s.start_time || s.startTime,\n    end_time: s.end_time || s.endTime || null,\n  }))\n  .filter(s => !!s.start_time)\n  .sort((a, b) => new Date(a.start_time) - new Date(b.start_time));\n\n// Build UI-friendly timeline array\nconst timeline = sorted.map(s => ({\n  time: hhmmInTz(s.start_time, timezone),\n  label: s.title,\n  location: s.location,\n  type: s.type,\n  start_time: s.start_time,\n  end_time: s.end_time,\n}));\n\nreturn {\n  json: {\n    user_id,\n    timezone,\n    date: dateKey,\n    timeline,\n    timeline_count: timeline.length,\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        336,
+        0
+      ],
+      "id": "7f1bf482-c0d5-4d04-8cb2-e0c04f4c9793",
+      "name": "Build Timeline"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Input item example:\n// { \"user_id\": \"u_123\", \"timezone\": \"Europe/Berlin\" }\n\n// Helper: format YYYY-MM-DD in a specific timezone\nfunction ymdInTz(date, tz) {\n  const parts = new Intl.DateTimeFormat(\"en-CA\", {\n    timeZone: tz,\n    year: \"numeric\",\n    month: \"2-digit\",\n    day: \"2-digit\",\n  }).formatToParts(date);\n  const y = parts.find(p => p.type === \"year\").value;\n  const m = parts.find(p => p.type === \"month\").value;\n  const d = parts.find(p => p.type === \"day\").value;\n  return `${y}-${m}-${d}`;\n}\n\n// Helper: get an ISO timestamp representing a \"wall-clock\" time in a timezone.\n// We do this by constructing the wall-clock string, then converting using Intl.\nfunction isoForWallClock(ymd, hhmmss, tz) {\n  // Build a wall-clock string like \"2025-12-19T00:00:00\"\n  const wall = `${ymd}T${hhmmss}`;\n\n  // Create a Date from wall-clock as if it were UTC, then shift to tz by reading\n  // what that instant would be in tz and computing the offset.\n  const asUTC = new Date(wall + \"Z\");\n\n  // Figure out tz offset at that instant\n  const dtf = new Intl.DateTimeFormat(\"en-US\", {\n    timeZone: tz,\n    hour12: false,\n    year: \"numeric\",\n    month: \"2-digit\",\n    day: \"2-digit\",\n    hour: \"2-digit\",\n    minute: \"2-digit\",\n    second: \"2-digit\",\n  });\n\n  const parts = dtf.formatToParts(asUTC);\n  const map = Object.fromEntries(parts.map(p => [p.type, p.value]));\n  // This is the tz local time representation of asUTC.\n  const tzLocal = `${map.year}-${map.month}-${map.day}T${map.hour}:${map.minute}:${map.second}`;\n\n  // Now interpret tzLocal as UTC to get the instant that corresponds to that tz local time\n  // (this effectively applies the offset).\n  const instant = new Date(tzLocal + \"Z\");\n  return instant.toISOString();\n}\n\nconst user_id = $json.user_id;\nconst timezone = $json.timezone || \"UTC\";\n\nconst now = new Date();\nconst dateKey = ymdInTz(now, timezone);\n\n// Start/end of day in that timezone (as ISO instants)\nconst startOfDayISO = isoForWallClock(dateKey, \"00:00:00\", timezone);\nconst endOfDayISO   = isoForWallClock(dateKey, \"23:59:59\", timezone);\n\nreturn {\n  json: {\n    user_id,\n    timezone,\n    dateKey,\n    startOfDayISO,\n    endOfDayISO,\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        144,
+        -64
+      ],
+      "id": "3c156aec-c7c6-4f41-a375-dfc328fcf5f5",
+      "name": "Date per user"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://travlo-ai-companion.lovable.app/api/daily_timeline/upsert",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"user_id\": \"={{$json.user_id}}\",\n  \"date\": \"={{$json.date}}\",\n  \"timezone\": \"={{$json.timezone}}\",\n  \"timeline\": \"={{$json.timeline}}\",\n  \"timeline_count\": \"={{$json.timeline_count}}\"\n}\n",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        544,
+        0
+      ],
+      "id": "5cad5e75-0e00-4958-adfa-79be9c4be242",
+      "name": "Save Daily Timeline"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Text response, no error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Text response, no error": {
+      "main": [
+        [
+          {
+            "node": "Mock Users",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mock Users": {
+      "main": [
+        [
+          {
+            "node": "Split Out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Date per user",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Replace Me",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Replace Me": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mock Segments": {
+      "main": [
+        [
+          {
+            "node": "Build Timeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Date per user": {
+      "main": [
+        [
+          {
+            "node": "Mock Segments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Timeline": {
+      "main": [
+        [
+          {
+            "node": "Save Daily Timeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "ef0d9951-a91a-49a8-94e9-972e9740e9dd",
+  "meta": {
+    "instanceId": "90f3a76db18e79de272f5875491a3df78a70a3318ef9184222b1a3e9c875727c"
+  },
+  "id": "39LLJcXb94hik919",
+  "tags": []
+}
