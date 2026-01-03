@@ -1,0 +1,1010 @@
+{
+  "name": "Workflow A - Email parser",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 1. Ingestion\nTriggers on manual execute or schedule. Fetches email with label 'travel' from Gmail, including attachments.",
+        "height": 132,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1488,
+        960
+      ],
+      "id": "b838a723-a135-4b55-8057-f0e502207d14",
+      "name": "Sticky Note 1"
+    },
+    {
+      "parameters": {
+        "content": "## 2. Preprocessing\nCustom JS decodes base64url email bodies, strips HTML tags to produce clean text, identifies/flags PDF attachments for the OCR branch.",
+        "height": 148,
+        "width": 256,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1216,
+        960
+      ],
+      "id": "2f9d9620-0f6e-44d4-977d-3ff40daf6504",
+      "name": "Sticky Note 2"
+    },
+    {
+      "parameters": {
+        "content": "## 3. OCR Branch\nConditional logic routes PDFs here. The node extracts raw text content from each PDF attachment found.",
+        "height": 132,
+        "width": 256,
+        "color": 2
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -928,
+        960
+      ],
+      "id": "3d5c5e97-a8fb-48cf-8068-574f936fbd51",
+      "name": "Sticky Note 3"
+    },
+    {
+      "parameters": {
+        "content": "## 4. Aggregation\nMerges the processed email body with the extracted text from its PDF attachments. Groups everything by Message ID to ensure a single context object per email.",
+        "height": 164,
+        "width": 256,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -640,
+        960
+      ],
+      "id": "78a50ec7-2235-435a-9568-44add8d21382",
+      "name": "Sticky Note 4"
+    },
+    {
+      "parameters": {
+        "content": "## 6. AI Extraction\nSends the consolidated text (Email + PDF) to GPT-4.1 mini. The model classifies the booking type and extracts structured data that you want to save in database (activity, dates, notes) matching the schema.",
+        "height": 164,
+        "width": 272,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        960
+      ],
+      "id": "c1b334ea-fa36-40fc-bde3-d4836bce079f",
+      "name": "Sticky Note 5"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1584,
+        1104
+      ],
+      "id": "f4e1c204-9f34-40ea-9510-21a733dcdeb8",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "returnAll": true,
+        "simple": false,
+        "filters": {
+          "labelIds": [
+            "Label_4554956988318047131"
+          ],
+          "readStatus": "both"
+        },
+        "options": {
+          "downloadAttachments": true
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        -1408,
+        1152
+      ],
+      "id": "1d8a4b17-1b66-4f1b-acdf-7e2937d22563",
+      "name": "Get many messages",
+      "webhookId": "d50e2464-4c2d-4977-bc70-1611e6764f00",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "b4SDfak7CuGCYNhP",
+          "name": "Gmail account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Run Once for All Items\nconst items = $input.all();\nconst out = [];\n\nfunction b64urlDecode(s = \"\") {\n  s = s.replace(/-/g, \"+\").replace(/_/g, \"/\");\n  const pad = s.length % 4 ? \"=\".repeat(4 - (s.length % 4)) : \"\";\n  return Buffer.from(s + pad, \"base64\").toString(\"utf8\");\n}\n\nfunction stripHtml(html = \"\") {\n  return html\n    .replace(/<style[\\s\\S]*?<\\/style>/gi, \"\")\n    .replace(/<script[\\s\\S]*?<\\/script>/gi, \"\")\n    .replace(/<\\/p>/gi, \"\\n\")\n    .replace(/<br\\s*\\/?>/gi, \"\\n\")\n    .replace(/<[^>]+>/g, \"\")\n    .replace(/&nbsp;/g, \" \")\n    .replace(/&amp;/g, \"&\")\n    .replace(/&lt;/g, \"<\")\n    .replace(/&gt;/g, \">\");\n}\n\nfunction findPart(payload, mime) {\n  const stack = [payload].filter(Boolean);\n  while (stack.length) {\n    const p = stack.pop();\n    if (p?.mimeType === mime && p?.body?.data) return p;\n    if (p?.parts?.length) stack.push(...p.parts);\n  }\n  return null;\n}\n\nfor (let i = 0; i < items.length; i++) {\n  const emailJson = items[i].json ?? {};\n  const emailBin = items[i].binary ?? {};\n\n  const messageId =\n    emailJson.id ||\n    emailJson.messageId ||\n    emailJson.threadId ||\n    String(emailJson.internalDate || i);\n\n  const payload = emailJson.payload;\n\n  const plain = findPart(payload, \"text/plain\");\n  const html = findPart(payload, \"text/html\");\n\n  const emailText =\n    emailJson.textPlain ||\n    emailJson.text ||\n    (plain ? b64urlDecode(plain.body.data) : \"\") ||\n    (html ? stripHtml(b64urlDecode(html.body.data)) : \"\") ||\n    emailJson.snippet ||\n    \"\";\n\n  out.push({\n    json: {\n      type: \"email\",\n      messageId,\n      subject: emailJson.headers?.subject ?? \"\",\n      from: emailJson.headers?.from ?? \"\",\n      date: emailJson.date ?? emailJson.headers?.date ?? \"\",\n      emailText,\n      raw: emailJson,\n      hasPdfs: false,\n      pdfCount: 0,\n    },\n  });\n\n  const pdfEntries = Object.entries(emailBin).filter(([_, b]) => {\n    const mt = (b?.mimeType || \"\").toLowerCase();\n    const fn = (b?.fileName || \"\").toLowerCase();\n    return mt.includes(\"pdf\") || fn.endsWith(\".pdf\");\n  });\n\n  out[out.length - 1].json.hasPdfs = pdfEntries.length > 0;\n  out[out.length - 1].json.pdfCount = pdfEntries.length;\n\n  for (const [key, b] of pdfEntries) {\n    // IMPORTANT: keep customData so you can recover messageId/fileName later\n    b.customData = { ...(b.customData || {}), messageId, fileName: b.fileName || key };\n\n    out.push({\n      json: { type: \"pdf\", messageId, attachmentKey: key, fileName: b.fileName || key, mimeType: b.mimeType || \"application/pdf\" },\n      binary: { attachment: b },\n    });\n  }\n}\n\nreturn out;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1216,
+        1152
+      ],
+      "id": "0e530ce4-ead5-43ae-8837-b8d1192f4492",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "binaryPropertyName": "attachment",
+        "options": {
+          "keepSource": "json"
+        }
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        -912,
+        1312
+      ],
+      "id": "1dff118c-2eb8-4c11-851f-4632a17270eb",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "347b4335-de9c-4073-8314-d0709303038d",
+              "leftValue": "={{ $json.type }}",
+              "rightValue": "pdf",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1056,
+        1152
+      ],
+      "id": "37b47ce1-04a5-4b21-a860-892363c65281",
+      "name": "If"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -608,
+        1152
+      ],
+      "id": "6404d5a7-4023-450f-89a2-e4148429f109",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => ({\n  json: {\n    type: \"pdfText\",\n    messageId: item.json.messageId,\n    fileName: item.json.fileName,\n    text: item.json.text || \"\",\n  },\n}));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -752,
+        1312
+      ],
+      "id": "1b829030-495c-46ce-994e-7c9becfec3ac",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst byId = new Map();\n\nfor (const item of items) {\n  const j = item.json || {};\n  const messageId = j.messageId;\n  if (!messageId) continue;\n\n  if (!byId.has(messageId)) {\n    byId.set(messageId, {\n      json: { messageId, subject: null, from: null, date: null, emailText: null, pdfs: [] },\n      pairedItem: item.pairedItem || { item: 0 }\n    });\n  }\n\n  const agg = byId.get(messageId);\n\n  // email rows\n  if (j.type === \"email\") {\n    agg.json.subject = j.subject;\n    agg.json.from = j.from;\n    agg.json.date = j.date;\n    agg.json.emailText = j.emailText;\n    continue;\n  }\n\n  // pdf rows AFTER Extract From File (they have j.text + numpages etc)\n  if (typeof j.text === \"string\" && j.text.trim()) {\n    agg.json.pdfs.push({\n      fileName: j.fileName || j.attachmentKey || \"attachment.pdf\",\n      text: j.text,\n    });\n  }\n}\n\n// Convert to array and ensure all items have pairedItem\nconst results = Array.from(byId.values());\nreturn results.map((item, index) => ({\n  json: item.json,\n  pairedItem: { item: index }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -464,
+        1152
+      ],
+      "id": "2e073b56-88e0-4e79-bd32-934b59afcd58",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a travel itinerary extraction assistant.\n\nthe email address is this: annamaria.blasiak@gmail.com\n\nmatchConfidence must be a number (e.g., 0.6), never a string.\n\nYour task is to extract clean, user-visible itinerary timeline segments from travel-related emails and attachments.\nEach segment represents ONE concrete item that can appear in a daily itinerary and must be ready to be saved directly into a database.\n\nYou must return ONLY valid JSON matching the provided schema.\nDo not include explanations or text outside the JSON.\nDo not invent data. If information is missing, return null.\n\n––––––––––––––––––––\nINPUT\n––––––––––––––––––––\n\nYou will receive:\n• subject{{ $json.subject }}\n• from{{ $json.from }}\n• date{{ $json.date }}\n• emailText{{ $json.emailText }} (plain text or cleaned HTML)\n• optional pdfs[] {{ $json.pdfs }}where each item has:\n  - fileName\n  - text (OCR or extracted PDF text)\n* All trips from Supabase - Get all trips where each one has {{ $json.name }} {{ $json.destinations }}, you'll use this to match each segment to a trip based on {{ $json.start_date }} and {{ $json.end_date }}\n\nThe content may include confirmations, itineraries, tickets, or receipts.\n\n––––––––––––––––––––\nGENERAL RULES\n––––––––––––––––––––\n\n• Prefer PDF text over emailText when both exist.\n• If multiple PDFs exist, use the one with the most complete itinerary.\n• Normalize airline, hotel, provider, city, and location names.\n• Convert dates/times to ISO-8601 when possible.\n• Include timezone ONLY if explicitly stated.\n• If only a date is known, return null for time fields.\n• Do NOT include marketing, legal, or footer text.\n• Notes should contain only traveler-useful information.\n• Assign a confidence score (0–1) for each segment.\n• If no itinerary items are present, return an empty segments array.\n\n––––––––––––––––––––\nSEGMENT SPLITTING RULES\n––––––––––––––––––––\n\n• One flight leg = one segment.\n• One hotel stay = one segment.\n• One tour / attraction / reservation = one segment.\n• One transport booking (train, bus, ferry, taxi, transfer) = one segment.\n• Do NOT merge unrelated items into a single segment.\n\n––––––––––––––––––––\nSEGMENT TYPES & EXTRACTION RULES\n––––––––––––––––––––\n\nFLIGHT (type: \"flight\")\n• Create one segment per flight leg.\n• title: \"Flight <FLIGHT_NUMBER>\" or \"Flight to <DESTINATION>\"\n• start_time: scheduled departure datetime\n• end_time: scheduled arrival datetime\n• start_location: departure airport\n• end_location: arrival airport\n• provider: airline name\n• confirmation: booking reference / record locator\n• notes: terminal, gate, baggage rules, boarding time\n\nACCOMMODATION (type: \"accommodation\")\n• One segment per hotel stay.\n• title: hotel name\n• start_time: check-in date (time optional)\n• end_time: check-out date (time optional)\n• start_location: hotel address or city\n• provider: hotel name or booking platform\n• confirmation: reservation number\n• description: room type or rate description\n• notes: check-in instructions, amenities\n\nACTIVITY / TOUR (type: \"activity\")\n• Create for tours, attractions, tickets, experiences.\n• title: activity or attraction name\n• start_time: activity start datetime\n• end_time: activity end datetime or null\n• start_location: venue or meeting point\n• provider: tour operator or venue\n• confirmation: booking or ticket reference\n• notes: entry instructions, dress code, meeting details\n\nTRANSPORT (non-flight) (type: \"transport\")\n• Use for trains, buses, ferries, transfers.\n• title: \"<MODE> to <DESTINATION>\"\n• start_time: departure datetime\n• end_time: arrival datetime\n• start_location: departure station/terminal\n• end_location: arrival station/terminal\n• provider: transport operator\n• confirmation: ticket or booking reference\n• notes: boarding info, luggage rules\n\nCAR RENTAL (type: \"car\")\n• title: \"Car rental – <PROVIDER>\"\n• start_time: pickup datetime\n• end_time: drop-off datetime\n• start_location: pickup location\n• end_location: drop-off location\n• provider: rental company\n• confirmation: reservation number\n• notes: fuel policy, insurance, pickup instructions\n\nMEAL / RESTAURANT (type: \"meal\")\n• title: restaurant name\n• start_time: reservation datetime\n• start_location: restaurant address or city\n• provider: restaurant or booking platform\n• confirmation: reservation reference\n• notes: dietary notes, dress code\n\nCRUISE (type: \"cruise\")\n• title: cruise or ship name\n• start_time: embarkation datetime\n• end_time: disembarkation datetime\n• start_location: departure port\n• end_location: arrival port\n• provider: cruise line\n• confirmation: booking reference\n• notes: cabin info, boarding instructions\n\nOTHER (type: \"other\")\n• Use only if travel-related but does not fit any category above.\n• Do NOT create segments for pure marketing emails.\n\n––––––––––––––––––––\nTRIP MATCHING\n––––––––––––––––––––\n\nAttempt to match this email to a trip based on:\n• destination names\n• date overlap\n• provider context\n\nIf a trip UUID is already known, include it.\nIf no confident match exists, set tripId to null and explain why.\n\n––––––––––––––––––––\nINPUT DATA\n––––––––––––––––––––\n\nsubject: {{$json.subject}}\nfrom: {{$json.from}}\ndate: {{$json.date}}\nemailText: {{$json.emailText}}\npdfs: {{$json.pdfs}}\n",
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        -176,
+        1152
+      ],
+      "id": "3881943f-cf51-43a0-9f3b-92c707dc2e7b",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"user_email\": {\n      \"type\": \"string\",\n      \"description\": \"Email address associated with this extraction\",\n      \"default\": \"annamaria.blasiak@gmail.com\"\n    },\n    \"tripMatch\": {\n      \"type\": \"object\",\n      \"properties\": {\n        \"tripId\": { \"type\": [\"string\", \"null\"] },\n        \"matchConfidence\": { \"type\": \"number\" },\n        \"matchReason\": { \"type\": [\"string\", \"null\"] }\n      }\n    },\n    \"segments\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"type\": {\n            \"type\": \"string\",\n            \"enum\": [\n              \"flight\",\n              \"transport\",\n              \"accommodation\",\n              \"activity\",\n              \"meal\",\n              \"car\",\n              \"cruise\",\n              \"other\"\n            ]\n          },\n          \"title\": { \"type\": \"string\" },\n          \"start_time\": { \"type\": [\"string\", \"null\"] },\n          \"end_time\": { \"type\": [\"string\", \"null\"] },\n          \"start_location\": { \"type\": [\"string\", \"null\"] },\n          \"end_location\": { \"type\": [\"string\", \"null\"] },\n          \"provider\": { \"type\": [\"string\", \"null\"] },\n          \"confirmation\": { \"type\": [\"string\", \"null\"] },\n          \"website\": { \"type\": [\"string\", \"null\"] },\n          \"phone\": { \"type\": [\"string\", \"null\"] },\n          \"description\": { \"type\": [\"string\", \"null\"] },\n          \"notes\": { \"type\": [\"string\", \"null\"] },\n          \"confidence\": { \"type\": \"number\" }\n        },\n        \"required\": [\"type\", \"title\"]\n      }\n    }\n  },\n  \"required\": [\"segments\"]\n}\n"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -32,
+        1344
+      ],
+      "id": "4a238eb1-9d0a-481f-b4cb-2f5f26997e1f",
+      "name": "Structured Output Parser"
+    },
+    {
+      "parameters": {
+        "content": "##  WORKFLOW A - Email Parser Agent\n- matching email with the right user\n- relevant email content extraction\n- finding matching trips based on dates and location from the extracted email\n- creating/updating segments in the correct trip",
+        "width": 448,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1488,
+        784
+      ],
+      "id": "72d90d91-0cef-4545-91c7-7fddef58321e",
+      "name": "Sticky Note "
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1584,
+        1264
+      ],
+      "id": "81a4991e-08ac-4e98-a2e1-0cd3acf31edd",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "content": "## 5. Matching with Trip Id \nSupabase query.",
+        "height": 164,
+        "width": 160,
+        "color": 2
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -352,
+        960
+      ],
+      "id": "0cddf508-c5bc-4b89-9a2c-af3de6d31846",
+      "name": "Sticky Note 6"
+    },
+    {
+      "parameters": {
+        "content": "## 7. Database change\nDatabase is updated or new row is created if new information is detected.",
+        "height": 164
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        144,
+        960
+      ],
+      "id": "5a8aa45f-41d1-486a-811d-7638541976db",
+      "name": "Sticky Note 7"
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * n8n Code node\n * Goal: output EXACTLY ONE validated segment (the “best” one) and shape it\n *       as a single Supabase row insert object.\n *\n * Assumptions:\n * - AI output is at $json.output\n * - $json.output.segments is an array (may be empty)\n * - Each segment has optional `confidence` (number)\n * - You want one row per email execution (best segment only)\n */\n\nconst items = $input.all();\nconst out = [];\n\nfunction pickBestSegment(segments) {\n  if (!Array.isArray(segments) || segments.length === 0) return null;\n\n  // Prefer highest confidence; fallback to first segment\n  const withConf = segments\n    .map((s, idx) => ({ s, idx, conf: typeof s?.confidence === 'number' ? s.confidence : -1 }))\n    .sort((a, b) => b.conf - a.conf);\n\n  const best = withConf[0]?.s ?? segments[0];\n\n  // Basic validation: must have type + title\n  if (!best?.type || !best?.title) return null;\n\n  return best;\n}\n\nfor (let i = 0; i < items.length; i++) {\n  const json = items[i].json || {};\n  const aiOutput = json.output || {};\n  const tripMatch = aiOutput.tripMatch || {};\n  const segments = aiOutput.segments || [];\n\n  // Prefer explicit user_email if present, otherwise fallback to from\n  const userEmail = json.user_email || json.from || \"annamaria.blasiak@gmail.com\";\n\n  // Prefer messageId keys you might have from Gmail node\n  const sourceEmailId =\n    json.messageId ||\n    json.source_email_id ||\n    json.gmailMessageId ||\n    json.source?.gmailMessageId ||\n    null;\n\n  // Pick ONE segment\n  const segment = pickBestSegment(segments);\n\n  if (!segment) {\n    out.push({\n      json: {\n        skip: true,\n        reason: \"No validated segment (missing type/title or empty segments)\",\n        user_email: userEmail,\n        source_email_id: sourceEmailId\n      },\n      pairedItem: { item: i }\n    });\n    continue;\n  }\n\n  // Build ONE Supabase insert row (single item output)\n  out.push({\n    json: {\n      // ---- identifiers / context (optional) ----\n      user_email: userEmail,\n      source_email_id: sourceEmailId,\n\n      // Trip match (optional; you can later map to trip_id/user_id)\n      suggested_trip_id: tripMatch.tripId ?? null,\n      match_confidence: typeof tripMatch.matchConfidence === \"number\" ? tripMatch.matchConfidence : 0,\n      match_reason: tripMatch.matchReason ?? null,\n\n      // ---- segment fields ----\n      segment_type: segment.type ?? \"other\",\n      title: segment.title ?? \"Untitled\",\n      start_time: segment.start_time ?? null,\n      end_time: segment.end_time ?? null,\n      start_location: segment.start_location ?? null,\n      end_location: segment.end_location ?? null,\n      provider: segment.provider ?? null,\n      confirmation: segment.confirmation ?? null,\n      website: segment.website ?? null,\n      phone: segment.phone ?? null,\n      description: segment.description ?? null,\n      notes: segment.notes ?? null,\n\n      // optional segment confidence\n      confidence: typeof segment.confidence === \"number\" ? segment.confidence : null\n    },\n    pairedItem: { item: i }\n  });\n}\n\nreturn out;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        416
+      ],
+      "id": "9e6bee85-62e5-457b-86f6-08ed19b19594",
+      "name": "Code in JavaScript3"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8b6d49bb-ddb2-4705-af96-142a74302c64",
+              "leftValue": "={{$items(\"Supabase - Get segments\").length}}\n",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        256,
+        1152
+      ],
+      "id": "78290481-6db2-460c-9821-6f2914d6b5b2",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "segments",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{$items(\"Supabase - Get segments\")[0].json.id}}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "start_time",
+              "fieldValue": "={{$json.start_time}}"
+            },
+            {
+              "fieldId": "end_time",
+              "fieldValue": "={{$json.end_time}}"
+            },
+            {
+              "fieldId": "provider",
+              "fieldValue": "={{$json.provider}}"
+            },
+            {
+              "fieldId": "start_location",
+              "fieldValue": "={{$json.start_location}}"
+            },
+            {
+              "fieldId": "end_time",
+              "fieldValue": "={{$json.end_location}}"
+            },
+            {
+              "fieldId": "confirmation",
+              "fieldValue": "={{$json.confirmation}}"
+            },
+            {
+              "fieldId": "website",
+              "fieldValue": "={{$json.website}}"
+            },
+            {
+              "fieldId": "phone",
+              "fieldValue": "={{$json.phone}}"
+            },
+            {
+              "fieldId": "description",
+              "fieldValue": "={{$json.description}}"
+            },
+            {
+              "fieldId": "notes",
+              "fieldValue": "={{$json.notes}}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        400,
+        1136
+      ],
+      "id": "531701c8-3c3f-47a9-9855-a78efce9d37f",
+      "name": "Update a row",
+      "credentials": {
+        "supabaseApi": {
+          "id": "lxOMCtevpvx6TmWV",
+          "name": "Supabase account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "tableId": "segments",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "trip_id",
+              "fieldValue": "={{$json.trip_id}}"
+            },
+            {
+              "fieldId": "user_id",
+              "fieldValue": "={{$json.user_id}}"
+            },
+            {
+              "fieldId": "type",
+              "fieldValue": "={{$json.type}}"
+            },
+            {
+              "fieldId": "title",
+              "fieldValue": "={{$json.title}}"
+            },
+            {
+              "fieldId": "start_time",
+              "fieldValue": "={{$json.start_time}}"
+            },
+            {
+              "fieldId": "end_time",
+              "fieldValue": "={{$json.end_time}}"
+            },
+            {
+              "fieldId": "start_location",
+              "fieldValue": "={{$json.start_location}}"
+            },
+            {
+              "fieldId": "end_time",
+              "fieldValue": "={{$json.end_location}}"
+            },
+            {
+              "fieldId": "provider",
+              "fieldValue": "={{$json.provider}}"
+            },
+            {
+              "fieldId": "confirmation",
+              "fieldValue": "={{$json.confirmation}}"
+            },
+            {
+              "fieldId": "website",
+              "fieldValue": "={{$json.website}}"
+            },
+            {
+              "fieldId": "phone",
+              "fieldValue": "={{$json.phone}}"
+            },
+            {
+              "fieldId": "description",
+              "fieldValue": "={{$json.description}}"
+            },
+            {
+              "fieldId": "notes",
+              "fieldValue": "={{$json.notes}}"
+            },
+            {
+              "fieldId": "source_message_id",
+              "fieldValue": "={{$json.source_message_id}}"
+            },
+            {
+              "fieldId": "source_thread_id",
+              "fieldValue": "={{$json.source_thread_id}}"
+            },
+            {
+              "fieldId": "source_subject",
+              "fieldValue": "={{$json.source_subject}}"
+            },
+            {
+              "fieldId": "source_used_pdf",
+              "fieldValue": "={{$json.source_used_pdf}}"
+            },
+            {
+              "fieldId": "source_pdf_filenames",
+              "fieldValue": "={{$json.source_pdf_filenames}}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        400,
+        1312
+      ],
+      "id": "9bf37e74-7596-48db-b811-7980a3eef642",
+      "name": "Create a row",
+      "credentials": {
+        "supabaseApi": {
+          "id": "lxOMCtevpvx6TmWV",
+          "name": "Supabase account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 6. Webhook\n- Looking up user by email\n- Finding matching trips by date\n- Checking for duplicates\n- Creating or updating segments",
+        "width": 256
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        464,
+        208
+      ],
+      "typeVersion": 1,
+      "id": "53e3c23c-8dd9-4882-82a8-50cbcebad503",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://wsnohpeewbmonnojzhyw.supabase.co/functions/v1/ingest-travel-email",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer ZqYkBfNXZ-Db6KH"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.user_email }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        624,
+        416
+      ],
+      "id": "c52e9b26-4ee8-48de-b93a-59dc160244e4",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "content": "## 7. Error handling",
+        "height": 144,
+        "width": 150
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        752,
+        208
+      ],
+      "id": "4778a509-3e83-4a2e-b405-2a41717fc7b0",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "7079296a-ac78-4f2b-8a0d-d71711f8e249",
+              "leftValue": "",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        784,
+        416
+      ],
+      "id": "ef677958-ce5a-4ad9-b282-93cc1ca2aae0",
+      "name": "If2"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "def77fa0-de58-4261-9233-9d088633992b",
+              "name": "user_email",
+              "value": "=={{$json.output?.user_email ?? null}}",
+              "type": "string"
+            },
+            {
+              "id": "a99716c4-afb7-4709-966d-fe45a5218a19",
+              "name": "tripId",
+              "value": "=={{$json.output?.tripMatch?.tripId ?? null}}",
+              "type": "string"
+            },
+            {
+              "id": "d95a35c0-e657-40e6-9281-d85ce6d60ccb",
+              "name": "matchConfidence",
+              "value": "=={{$json.output?.tripMatch?.matchConfidence ?? 0}}",
+              "type": "number"
+            },
+            {
+              "id": "06d65429-b4f0-4698-b65f-d40a20213648",
+              "name": "matchReason",
+              "value": "=={{$json.output?.tripMatch?.matchReason ?? null}}",
+              "type": "string"
+            },
+            {
+              "id": "a8fb1e5b-fec4-401c-80ee-f90c19f0f62d",
+              "name": "segments",
+              "value": "=={{$json.output?.segments ?? []}}",
+              "type": "array"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        176,
+        416
+      ],
+      "id": "11594bad-0a77-424d-8bdd-91b55c6626c0",
+      "name": "Normalise AI output",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "You are a trip–segment matching assistant.\n\nYou will receive:\n\na user email\n\nan array of extracted itinerary segments\n\nan array of ALL existing trips for this user (already fetched from the database)\n\n⚠️ You must NOT query any tools or databases.\nAll required data is already provided in the input.\n\nYour only task is to assign each segment to the correct trip.\n\nINPUT STRUCTURE\n\nYou will receive a JSON object with:\n\n{\n  \"user_email\": \"string\",\n  \"segments\": [\n    {\n      \"type\": \"string\",\n      \"title\": \"string\",\n      \"start_time\": \"ISO datetime | null\",\n      \"end_time\": \"ISO datetime | null\",\n      \"start_location\": \"string | null\",\n      \"end_location\": \"string | null\",\n      \"notes\": \"string | null\"\n    }\n  ],\n  \"trips\": [\n    {\n      \"id\": \"uuid\",\n      \"name\": \"string\",\n      \"start_date\": \"YYYY-MM-DD\",\n      \"end_date\": \"YYYY-MM-DD\",\n      \"destinations\": [\n        { \"name\": \"string\" }\n      ]\n    }\n  ]\n}\n\nMATCHING RULES (STRICT)\n1. Date overlap (mandatory)\n\nA segment can belong to a trip ONLY if:\n\nsegment_date (from start_time or end_time) is within\ntrip.start_date ≤ segment_date ≤ trip.end_date\n\nIf no date is present → return trip_id: null.\n\n2. Location relevance (tie-breaker)\n\nIf multiple trips overlap by date:\n\nPrefer the trip whose destinations match words found in:\n\nsegment.start_location\n\nsegment.end_location\n\nsegment.title\n\nMatching is case-insensitive and partial (e.g. “Tokyo” matches “Tokyo, Japan”).\n\n3. Final fallback\n\nIf still ambiguous:\n\nChoose the trip with the closest start_date to the segment_date.\n\nIf no trip matches at all:\n\nAssign trip_id: null.\n\nOUTPUT REQUIREMENTS\n\nReturn ONLY valid JSON in this exact structure:\n\n{\n  \"segments\": [\n    {\n      \"type\": \"string\",\n      \"title\": \"string\",\n      \"start_time\": \"string | null\",\n      \"end_time\": \"string | null\",\n      \"start_location\": \"string | null\",\n      \"end_location\": \"string | null\",\n      \"notes\": \"string | null\",\n      \"trip_id\": \"uuid | null\"\n    }\n  ]\n}\n\nIMPORTANT RULES\n\nDo NOT invent trip IDs.\n\nDo NOT modify trip data.\n\nDo NOT include explanations.\n\nDo NOT include tool calls.\n\nDo NOT output undefined. Use null if unknown.\n\nOutput JSON only.",
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        -192,
+        416
+      ],
+      "id": "12b74b93-9b6b-4025-a3b8-718ec1873c34",
+      "name": "AI Agent1"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "trips",
+        "matchType": "allFilters"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -336,
+        1328
+      ],
+      "id": "297f1a28-0d9e-4c00-a4aa-0d91caca15fd",
+      "name": "Supabase - Get all trips",
+      "executeOnce": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "lxOMCtevpvx6TmWV",
+          "name": "Supabase account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "segments",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "user_id",
+              "condition": "eq",
+              "keyValue": "={{$json.trip_id}}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        112,
+        1152
+      ],
+      "id": "d3591113-af57-4912-8a39-2dbd4f1ccdaf",
+      "name": "Supabase - Get segments",
+      "executeOnce": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "lxOMCtevpvx6TmWV",
+          "name": "Supabase account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -176,
+        1344
+      ],
+      "id": "4c0d1b85-4ec9-43ac-9c39-102d3e542855",
+      "name": "OpenAI Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "LlL0d4Bt4ZVRhpZi",
+          "name": "OpenAi account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Get many messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get many messages": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Supabase - Get all trips",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Supabase - Get segments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get many messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript3": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "Update a row",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create a row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "If2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalise AI output": {
+      "main": [
+        []
+      ]
+    },
+    "AI Agent1": {
+      "main": [
+        []
+      ]
+    },
+    "Supabase - Get all trips": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase - Get segments": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "046b550f-a96c-4efe-9bad-c737180a2729",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "2bc4dcb75589d191630a945ddba8487aaa6ef5f962b3e299cbecf2e356f08788"
+  },
+  "id": "YpGFKCvn9EneFa5M",
+  "tags": []
+}
